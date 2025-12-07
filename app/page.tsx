@@ -238,25 +238,28 @@ export default function Home() {
     realtimeSync.broadcastState(newState);
   }
 
-  function handleDrawingComplete(imageData: string) {
+  async function handleDrawingComplete(imageData: string) {
     if (!gameState || hasSubmitted) return;
+
+    // Fetch latest state to ensure we don't overwrite others' drawings
+    const currentRemoteState = await realtimeSync.getRemoteState() || gameState;
 
     const drawingId = `${userId}_${Date.now()}`;
     const newDrawing: Drawing = {
       id: drawingId,
       imageData,
-      word: gameState.currentWord,
+      word: currentRemoteState.currentWord,
       author: userName || `Player ${userId.slice(-4)}`,
       votes: 0,
     };
 
     const newState: GameState = {
-      ...gameState,
-      drawings: [...gameState.drawings.filter(d => !d.id.startsWith(userId)), newDrawing],
+      ...currentRemoteState,
+      drawings: [...currentRemoteState.drawings.filter(d => !d.id.startsWith(userId)), newDrawing],
     };
 
     setGameState(newState);
-    realtimeSync.broadcastState(newState);
+    await realtimeSync.broadcastState(newState);
     setHasSubmitted(true);
   }
 
