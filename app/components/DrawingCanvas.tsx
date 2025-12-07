@@ -126,27 +126,32 @@ export default function DrawingCanvas({ onDrawingComplete, word, disabled = fals
           <div className="w-full h-px bg-current absolute top-1/2"></div>
           <div className="w-full h-px bg-current absolute top-1/2 rotate-90"></div>
         </div>
-        
+
         {/* Ornaments */}
         <div className="absolute top-4 left-12 w-1.5 h-1.5 bg-red-500 rounded-full opacity-20"></div>
         <div className="absolute top-8 right-12 w-1.5 h-1.5 bg-green-500 rounded-full opacity-20"></div>
         <div className="absolute bottom-8 left-12 w-1.5 h-1.5 bg-red-500 rounded-full opacity-20"></div>
         <div className="absolute bottom-4 right-12 w-1.5 h-1.5 bg-green-500 rounded-full opacity-20"></div>
-        
+
         {/* Stars */}
         <div className="absolute top-0 left-1/2 text-yellow-400 opacity-15 text-xs" style={{ transform: 'translateX(-50%) rotate(45deg)' }}>✦</div>
       </div>
-      
-      <div className="text-center relative z-10">
-        <h2 className="text-lg font-light text-gray-900 mb-1 relative">
-          <span className="absolute -left-8 top-0 text-red-500 opacity-30 text-sm" style={{ transform: 'rotate(45deg)' }}>✦</span>
-          Draw
-          <span className="absolute -right-8 top-0 text-green-500 opacity-30 text-sm" style={{ transform: 'rotate(45deg)' }}>✦</span>
+
+      <div className="text-center relative z-10 mb-4">
+        <h2 className="text-xl font-light text-gray-900 mb-3 relative inline-block">
+          <span className="absolute -left-8 top-1 text-red-500 opacity-40 text-lg animate-pulse" style={{ transform: 'rotate(45deg)' }}>✦</span>
+          Draw this:
+          <span className="absolute -right-8 top-1 text-green-500 opacity-40 text-lg animate-pulse" style={{ transform: 'rotate(45deg)', animationDelay: '1s' }}>✦</span>
         </h2>
-        <p className="text-sm text-gray-500">{word}</p>
-        {disabled && <p className="text-xs text-gray-400 mt-2">Viewing mode</p>}
+        <div className="relative inline-block">
+          <p className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-red-600 to-green-600 px-8 py-2 filter drop-shadow-sm transform hover:scale-105 transition-transform duration-300">
+            {word}
+          </p>
+          <div className="absolute -bottom-2 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent"></div>
+        </div>
+        {disabled && <p className="text-xs text-gray-400 mt-2 uppercase tracking-widest">Viewing mode</p>}
       </div>
-      
+
       <div className="border-2 border-gray-300 p-3 shadow-lg relative z-10 rounded-lg bg-gradient-to-br from-white to-gray-50">
         <canvas
           ref={canvasRef}
@@ -172,9 +177,8 @@ export default function DrawingCanvas({ onDrawingComplete, word, disabled = fals
                   <button
                     key={c}
                     onClick={() => setColor(c)}
-                    className={`w-6 h-6 ${
-                      color === c ? 'ring-2 ring-gray-900 ring-offset-1' : ''
-                    }`}
+                    className={`w-6 h-6 ${color === c ? 'ring-2 ring-gray-900 ring-offset-1' : ''
+                      }`}
                     style={{ backgroundColor: c }}
                     type="button"
                   />

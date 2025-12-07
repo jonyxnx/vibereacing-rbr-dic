@@ -23,12 +23,13 @@ export default function Home() {
   const [userVote, setUserVote] = useState<string | null>(null);
   const [activePlayerCount, setActivePlayerCount] = useState<number>(0);
   const [showPlayers, setShowPlayers] = useState<boolean>(false);
+  const [isJoined, setIsJoined] = useState<boolean>(false);
 
   // Initialize user
   useEffect(() => {
     const savedUserId = localStorage.getItem('userId');
     const savedUserName = localStorage.getItem('userName');
-    
+
     if (savedUserId) {
       setUserId(savedUserId);
     } else {
@@ -36,9 +37,10 @@ export default function Home() {
       setUserId(newUserId);
       localStorage.setItem('userId', newUserId);
     }
-    
+
     if (savedUserName) {
       setUserName(savedUserName);
+      setIsJoined(true);
     }
   }, []);
 
@@ -47,14 +49,14 @@ export default function Home() {
     const unsubscribe = realtimeSync.subscribe((state) => {
       if (state) {
         setGameState(state);
-        
+
         // Update active player count
         const thirtySecondsAgo = Date.now() - 30000;
         const activePlayers = Object.keys(state.activePlayers || {}).filter(
           (id) => state.activePlayers[id] > thirtySecondsAgo
         );
         setActivePlayerCount(activePlayers.length);
-        
+
         // Check if user has already submitted
         const userDrawing = state.drawings.find(d => d.id.startsWith(userId));
         if (userDrawing) {
@@ -64,7 +66,7 @@ export default function Home() {
         if (state.votes[userId]) {
           setUserVote(state.votes[userId]);
         }
-        
+
         // Calculate time left
         if (state.phase === 'drawing') {
           const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
@@ -79,46 +81,12 @@ export default function Home() {
     return unsubscribe;
   }, [userId]);
 
-  // Initialize or load game state
+  // Initialize or load game state - DEPRECATED/REMOVED
+  // Hydration now handled by realtimeSync subscription
   useEffect(() => {
-    if (!userId) return;
-    
-    const saved = realtimeSync.getState();
-    if (saved) {
-      // Join existing game
-      const gameStateWithPlayers = {
-        ...saved,
-        activePlayers: {
-          ...(saved.activePlayers || {}),
-          [userId]: Date.now(),
-        },
-      };
-      setGameState(gameStateWithPlayers);
-      realtimeSync.broadcastState(gameStateWithPlayers);
-      
-      // Check if user has already submitted
-      const userDrawing = saved.drawings.find(d => d.id.startsWith(userId));
-      if (userDrawing) {
-        setHasSubmitted(true);
-      }
-      // Check if user has voted
-      if (saved.votes[userId]) {
-        setUserVote(saved.votes[userId]);
-      }
-      
-      // Calculate time left
-      if (saved.phase === 'drawing') {
-        const elapsed = Math.floor((Date.now() - saved.startTime) / 1000);
-        setTimeLeft(Math.max(0, saved.drawingTimeLimit - elapsed));
-      } else if (saved.phase === 'voting') {
-        const elapsed = Math.floor((Date.now() - saved.startTime) / 1000);
-        setTimeLeft(Math.max(0, saved.votingTimeLimit - (elapsed - saved.drawingTimeLimit)));
-      }
-    } else {
-      // Only initialize new game if no game exists
-      initializeNewGame();
-    }
-  }, [userId]);
+    // We rely on the Supabase subscription to populate gameState.
+    // Presence heartbeat will take over once gameState is populated.
+  }, []);
 
   // Timer effect
   useEffect(() => {
@@ -126,7 +94,7 @@ export default function Home() {
 
     const interval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - gameState.startTime) / 1000);
-      
+
       if (gameState.phase === 'drawing') {
         const remaining = gameState.drawingTimeLimit - elapsed;
         setTimeLeft(Math.max(0, remaining));
@@ -148,7 +116,7 @@ export default function Home() {
   // Update active player status and sync
   useEffect(() => {
     if (!userId || !gameState) return;
-    
+
     const interval = setInterval(() => {
       // Update active player status
       const updatedState = {
@@ -158,7 +126,7 @@ export default function Home() {
           [userId]: Date.now(),
         },
       };
-      
+
       // Remove inactive players (30 seconds)
       const thirtySecondsAgo = Date.now() - 30000;
       Object.keys(updatedState.activePlayers).forEach((id) => {
@@ -166,10 +134,10 @@ export default function Home() {
           delete updatedState.activePlayers[id];
         }
       });
-      
+
       const activeCount = Object.keys(updatedState.activePlayers).length;
       setActivePlayerCount(activeCount);
-      
+
       // Broadcast updated state
       realtimeSync.broadcastState(updatedState);
     }, 2000); // Update every 2 seconds
@@ -193,7 +161,7 @@ export default function Home() {
       realtimeSync.broadcastState(gameStateWithPlayers);
       return;
     }
-    
+
     // Only create new game if none exists
     const newState: GameState = {
       phase: 'drawing',
@@ -202,7 +170,7 @@ export default function Home() {
       votes: {},
       startTime: Date.now(),
       drawingTimeLimit: 120, // 2 minutes
-      votingTimeLimit: 60, // 1 minute
+      votingTimeLimit: 20, // 20 seconds
       activePlayers: userId ? { [userId]: Date.now() } : {},
     };
     setGameState(newState);
@@ -242,7 +210,7 @@ export default function Home() {
 
   function advanceToResults() {
     if (!gameState) return;
-    
+
     // Calculate votes
     const voteCounts: Record<string, number> = {};
     Object.values(gameState.votes).forEach((drawingId) => {
@@ -309,7 +277,7 @@ export default function Home() {
       votes: {},
       startTime: Date.now(),
       drawingTimeLimit: 120,
-      votingTimeLimit: 60,
+      votingTimeLimit: 20,
       activePlayers: userId ? { [userId]: Date.now() } : {},
     };
     setGameState(newState);
@@ -325,7 +293,7 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
-  if (!gameState || !userName) {
+  if (!gameState || !isJoined) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-green-50 flex items-center justify-center p-4 relative overflow-hidden">
         {/* Enhanced Christmas Decorations */}
@@ -348,17 +316,17 @@ export default function Home() {
               <div className="w-full h-px bg-current absolute top-1/2 rotate-45"></div>
             </div>
           ))}
-          
+
           {/* Ornaments */}
           <div className="absolute top-24 left-24 w-3 h-3 bg-red-500 rounded-full opacity-30 animate-pulse"></div>
           <div className="absolute top-40 right-32 w-2.5 h-2.5 bg-green-500 rounded-full opacity-30 animate-pulse" style={{ animationDelay: '1s' }}></div>
           <div className="absolute bottom-40 left-32 w-3 h-3 bg-red-500 rounded-full opacity-30 animate-pulse" style={{ animationDelay: '0.5s' }}></div>
           <div className="absolute bottom-24 right-24 w-2.5 h-2.5 bg-green-500 rounded-full opacity-30 animate-pulse" style={{ animationDelay: '1.5s' }}></div>
-          
+
           {/* Stars */}
           <div className="absolute top-16 right-12 text-yellow-400 opacity-25 text-lg animate-spin-slow" style={{ transform: 'rotate(45deg)' }}>✦</div>
           <div className="absolute bottom-16 left-12 text-yellow-400 opacity-25 text-lg animate-spin-slow" style={{ transform: 'rotate(45deg)', animationDirection: 'reverse' }}>✦</div>
-          
+
           {/* Garland lines with gradient */}
           <div className="absolute top-0 left-1/4 w-px h-40 bg-gradient-to-b from-red-500/20 via-red-500/10 to-transparent"></div>
           <div className="absolute top-0 right-1/4 w-px h-40 bg-gradient-to-b from-green-500/20 via-green-500/10 to-transparent"></div>
@@ -371,7 +339,7 @@ export default function Home() {
           <div className="absolute -bottom-3 -left-3 w-6 h-6 bg-green-500 rounded-full opacity-40 animate-pulse" style={{ animationDelay: '1s' }}></div>
           <div className="absolute -top-3 -left-3 w-4 h-4 bg-yellow-400 rounded-full opacity-30"></div>
           <div className="absolute -bottom-3 -right-3 w-4 h-4 bg-yellow-400 rounded-full opacity-30"></div>
-          
+
           <h1 className="text-4xl font-light text-center mb-8 text-gray-900 tracking-tight relative">
             <span className="absolute -left-10 top-0 text-red-500 opacity-50 text-xl animate-float" style={{ transform: 'rotate(45deg)' }}>✦</span>
             Christmas Drawing
@@ -380,24 +348,20 @@ export default function Home() {
             <span className="absolute -right-10 top-0 text-green-500 opacity-50 text-xl animate-float" style={{ transform: 'rotate(45deg)', animationDelay: '1.5s' }}>✦</span>
           </h1>
           <div className="space-y-6">
-            <label className="block">
-              <span className="text-gray-600 text-sm font-normal mb-2 block">Enter your name</span>
-              <input
-                type="text"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 focus:outline-none focus:border-gray-900 bg-transparent rounded-lg transition-all"
-                placeholder="Your name"
-              />
-            </label>
-            <button
-              onClick={() => {
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
                 if (userName.trim()) {
                   const trimmedName = userName.trim();
                   localStorage.setItem('userName', trimmedName);
-                  
+
                   // Ensure game state exists or join existing game
-                  const saved = realtimeSync.getState();
+                  // Check remote state to avoid overwriting an active game
+                  let saved = realtimeSync.getState();
+                  if (!saved) {
+                    saved = await realtimeSync.getRemoteState();
+                  }
+
                   if (!saved) {
                     // Create new game
                     const newState: GameState = {
@@ -407,11 +371,11 @@ export default function Home() {
                       votes: {},
                       startTime: Date.now(),
                       drawingTimeLimit: 120,
-                      votingTimeLimit: 60,
+                      votingTimeLimit: 20,
                       activePlayers: userId ? { [userId]: Date.now() } : {},
                     };
                     setGameState(newState);
-                    realtimeSync.broadcastState(newState);
+                    await realtimeSync.broadcastState(newState);
                     setTimeLeft(newState.drawingTimeLimit);
                   } else {
                     // Join existing game
@@ -423,7 +387,7 @@ export default function Home() {
                       },
                     };
                     setGameState(gameStateWithPlayers);
-                    realtimeSync.broadcastState(gameStateWithPlayers);
+                    await realtimeSync.broadcastState(gameStateWithPlayers);
                     if (saved.phase === 'drawing') {
                       const elapsed = Math.floor((Date.now() - saved.startTime) / 1000);
                       setTimeLeft(Math.max(0, saved.drawingTimeLimit - elapsed));
@@ -441,17 +405,32 @@ export default function Home() {
                       setUserVote(saved.votes[userId]);
                     }
                   }
-                  
+
                   // Set userName last to trigger re-render
                   setUserName(trimmedName);
+                  setIsJoined(true);
                 }
               }}
-              disabled={!userName.trim()}
-              className="w-full px-6 py-4 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 hover:from-gray-800 hover:via-gray-700 hover:to-gray-800 disabled:from-gray-200 disabled:to-gray-200 disabled:cursor-not-allowed text-white font-normal text-sm transition-all duration-300 shadow-xl hover:shadow-2xl transform hover:scale-105 disabled:transform-none rounded-xl relative overflow-hidden group"
             >
-              <span className="relative z-10">Start Playing</span>
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
-            </button>
+              <label className="block mb-6">
+                <span className="text-black text-sm font-normal mb-2 block">Enter your name</span>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 focus:outline-none focus:border-gray-900 bg-transparent rounded-lg transition-all text-black"
+                  placeholder="Your name"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!userName.trim()}
+                className="w-full px-6 py-4 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 hover:from-gray-800 hover:via-gray-700 hover:to-gray-800 disabled:from-gray-200 disabled:to-gray-200 disabled:cursor-not-allowed text-white font-normal text-sm transition-all duration-300 shadow-xl hover:shadow-2xl transform hover:scale-105 disabled:transform-none rounded-xl relative overflow-hidden group"
+              >
+                <span className="relative z-10">Start Playing</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+              </button>
+            </form>
           </div>
         </div>
       </div>
@@ -480,7 +459,7 @@ export default function Home() {
             <div className="w-full h-px bg-current absolute top-1/2 rotate-45"></div>
           </div>
         ))}
-        
+
         {/* Ornaments */}
         <div className="absolute top-16 left-16 w-3 h-3 bg-red-500 rounded-full opacity-25 animate-pulse"></div>
         <div className="absolute top-32 right-24 w-2.5 h-2.5 bg-green-500 rounded-full opacity-25 animate-pulse" style={{ animationDelay: '1s' }}></div>
@@ -490,19 +469,19 @@ export default function Home() {
         <div className="absolute top-2/3 right-8 w-2 h-2 bg-green-500 rounded-full opacity-20"></div>
         <div className="absolute top-1/4 right-12 w-2 h-2 bg-red-500 rounded-full opacity-20"></div>
         <div className="absolute bottom-1/4 left-12 w-2 h-2 bg-green-500 rounded-full opacity-20"></div>
-        
+
         {/* Stars */}
         <div className="absolute top-8 left-1/4 text-yellow-400 opacity-20 text-base animate-spin-slow" style={{ transform: 'rotate(45deg)' }}>✦</div>
         <div className="absolute top-8 right-1/4 text-yellow-400 opacity-20 text-base animate-spin-slow" style={{ transform: 'rotate(45deg)', animationDirection: 'reverse' }}>✦</div>
         <div className="absolute bottom-8 left-1/3 text-yellow-400 opacity-20 text-base animate-spin-slow" style={{ transform: 'rotate(45deg)' }}>✦</div>
         <div className="absolute bottom-8 right-1/3 text-yellow-400 opacity-20 text-base animate-spin-slow" style={{ transform: 'rotate(45deg)', animationDirection: 'reverse' }}>✦</div>
-        
+
         {/* Garland lines */}
         <div className="absolute top-0 left-1/4 w-px h-40 bg-gradient-to-b from-red-500/20 via-red-500/10 to-transparent"></div>
         <div className="absolute top-0 right-1/4 w-px h-40 bg-gradient-to-b from-green-500/20 via-green-500/10 to-transparent"></div>
         <div className="absolute bottom-0 left-1/3 w-px h-40 bg-gradient-to-t from-red-500/20 via-red-500/10 to-transparent"></div>
         <div className="absolute bottom-0 right-1/3 w-px h-40 bg-gradient-to-t from-green-500/20 via-green-500/10 to-transparent"></div>
-        
+
         {/* Horizontal garland */}
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-red-500/15 to-transparent"></div>
         <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-500/15 to-transparent"></div>
@@ -591,7 +570,7 @@ export default function Home() {
         </main>
 
         <footer className="text-center mt-12 pt-8 border-t-2 border-gray-200 text-xs text-gray-400">
-          <p className="bg-white/60 px-4 py-2 rounded-lg inline-block">Share this page to play together • Real-time multiplayer</p>
+          <p className="bg-white/60 px-4 py-2 rounded-lg inline-block">Share this URL to play together • Real-time multiplayer</p>
         </footer>
       </div>
     </div>
