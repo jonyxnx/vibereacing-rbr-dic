@@ -76,10 +76,53 @@ class RealtimeSync {
     this.listeners.forEach((callback) => callback(state));
   }
 
-  async broadcastState(state: GameState) {
-    // 1. Optimistic update for local UI
+  async submitDrawing(drawing: any) {
+    // Optimistic update
+    const cached = this.getState();
+    if (cached) {
+      cached.drawings.push(drawing);
+      this.notifyListeners(cached);
+    }
+
+    // Server Atomic Update
+    const { error } = await supabase.rpc('submit_drawing', {
+      room_id: ROOM_ID,
+      drawing: drawing
+    });
+
+    if (error) {
+      console.error('Error submitting drawing:', error);
+      // Revert or re-fetch specific strategy could go here
+    }
+  }
+
+  async submitVote(userId: string, drawingId: string) {
+    const cached = this.getState();
+    if (cached) {
+      cached.votes[userId] = drawingId;
+      this.notifyListeners(cached);
+    }
+
+    const { error } = await supabase.rpc('submit_vote', {
+      room_id: ROOM_ID,
+      user_id: userId,
+      drawing_id: drawingId
+    });
+
+    if (error) {
+      console.error('Error submitting vote:', error);
+    }
+  }
+
+  async broadcastState(state: GameState, atomic = false) {
+    // 1. Optimistic update
     this.notifyListeners(state);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+    if (atomic) {
+      // If we flagged this as critical, we might want to be careful
+      // But for general phase changes, simple Upsert is usually OK as long as only one person does it (The host)
+    }
 
     // 2. Persist to DB
     const { error } = await supabase

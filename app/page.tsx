@@ -241,25 +241,18 @@ export default function Home() {
   async function handleDrawingComplete(imageData: string) {
     if (!gameState || hasSubmitted) return;
 
-    // Fetch latest state to ensure we don't overwrite others' drawings
-    const currentRemoteState = await realtimeSync.getRemoteState() || gameState;
-
+    // Use current word from local state, as we are committed to it
     const drawingId = `${userId}_${Date.now()}`;
     const newDrawing: Drawing = {
       id: drawingId,
       imageData,
-      word: currentRemoteState.currentWord,
+      word: gameState.currentWord,
       author: userName || `Player ${userId.slice(-4)}`,
       votes: 0,
     };
 
-    const newState: GameState = {
-      ...currentRemoteState,
-      drawings: [...currentRemoteState.drawings.filter(d => !d.id.startsWith(userId)), newDrawing],
-    };
-
-    setGameState(newState);
-    await realtimeSync.broadcastState(newState);
+    // Use atomic submit
+    await realtimeSync.submitDrawing(newDrawing);
     setHasSubmitted(true);
   }
 
