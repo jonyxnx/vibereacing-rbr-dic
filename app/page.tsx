@@ -188,9 +188,16 @@ export default function Home() {
     if (gameState.phase === 'drawing' && elapsed >= gameState.drawingTimeLimit) {
       if (gameState.drawings.length > 0) {
         advanceToVoting();
+      } else {
+        // No drawings submitted, auto-restart round
+        handleNewRound();
       }
     } else if (gameState.phase === 'voting' && elapsed >= gameState.drawingTimeLimit + gameState.votingTimeLimit) {
       if (Object.keys(gameState.votes).length > 0) {
+        advanceToResults();
+      } else {
+        // No votes cast (or handling edge case), show results anyway or restart
+        // For now, let's advance to results to show the empty votes (or lack thereof)
         advanceToResults();
       }
     }
