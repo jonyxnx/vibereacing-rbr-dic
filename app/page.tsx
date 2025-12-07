@@ -113,37 +113,24 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [gameState, hasSubmitted]);
 
-  // Update active player status and sync
+  // Track presence and update count
   useEffect(() => {
-    if (!userId || !gameState) return;
+    if (!userId) return;
+
+    // Announce presence
+    realtimeSync.trackPresence(userId);
 
     const interval = setInterval(() => {
-      // Update active player status
-      const updatedState = {
-        ...gameState,
-        activePlayers: {
-          ...(gameState.activePlayers || {}),
-          [userId]: Date.now(),
-        },
-      };
-
-      // Remove inactive players (30 seconds)
-      const thirtySecondsAgo = Date.now() - 30000;
-      Object.keys(updatedState.activePlayers).forEach((id) => {
-        if (updatedState.activePlayers[id] < thirtySecondsAgo) {
-          delete updatedState.activePlayers[id];
-        }
-      });
-
-      const activeCount = Object.keys(updatedState.activePlayers).length;
-      setActivePlayerCount(activeCount);
-
-      // Broadcast updated state
-      realtimeSync.broadcastState(updatedState);
-    }, 2000); // Update every 2 seconds
+      // Just check presence locally
+      const state = realtimeSync.getPresenceState();
+      // Count unique users
+      // Supabase returns object { id: [payloads] }
+      const count = Object.keys(state).length;
+      setActivePlayerCount(count);
+    }, 2000);
 
     return () => clearInterval(interval);
-  }, [gameState, userId]);
+  }, [userId]);
 
   function initializeNewGame() {
     // Check if a game already exists before creating a new one
@@ -152,13 +139,10 @@ export default function Home() {
       // Join existing game instead of creating new one
       const gameStateWithPlayers = {
         ...existing,
-        activePlayers: {
-          ...(existing.activePlayers || {}),
-          ...(userId ? { [userId]: Date.now() } : {}),
-        },
+        // Active players now handled by Presence, just pass through
       };
       setGameState(gameStateWithPlayers);
-      realtimeSync.broadcastState(gameStateWithPlayers);
+      // Do NOT broadcast full state here unless creating
       return;
     }
 
@@ -171,10 +155,10 @@ export default function Home() {
       startTime: Date.now(),
       drawingTimeLimit: 120, // 2 minutes
       votingTimeLimit: 20, // 20 seconds
-      activePlayers: userId ? { [userId]: Date.now() } : {},
+      activePlayers: {}, // Deprecated
     };
     setGameState(newState);
-    realtimeSync.broadcastState(newState);
+    realtimeSync.broadcastState(newState); // Create initial
     setHasSubmitted(false);
     setUserVote(null);
     setTimeLeft(newState.drawingTimeLimit);
@@ -184,6 +168,10 @@ export default function Home() {
     if (!gameState) return;
 
     const elapsed = Math.floor((Date.now() - gameState.startTime) / 1000);
+
+    // Only one person needs to trigger the phase change. 
+    // Usually solving this distributed is hard, but we can just race.
+    // The DB RPC 'update_phase' can be idempotent if we want, or we just trust the first one wins.
 
     if (gameState.phase === 'drawing' && elapsed >= gameState.drawingTimeLimit) {
       if (gameState.drawings.length > 0) {
@@ -196,8 +184,6 @@ export default function Home() {
       if (Object.keys(gameState.votes).length > 0) {
         advanceToResults();
       } else {
-        // No votes cast (or handling edge case), show results anyway or restart
-        // For now, let's advance to results to show the empty votes (or lack thereof)
         advanceToResults();
       }
     }
@@ -205,37 +191,22 @@ export default function Home() {
 
   function advanceToVoting() {
     if (!gameState) return;
-    const newState: GameState = {
-      ...gameState,
-      phase: 'voting',
-      startTime: Date.now() - gameState.drawingTimeLimit * 1000,
-    };
-    setGameState(newState);
-    realtimeSync.broadcastState(newState);
-    setTimeLeft(gameState.votingTimeLimit);
+    realtimeSync.updatePhase('voting', 20);
+    // Optimistic
+    setGameState({ ...gameState, phase: 'voting', startTime: Date.now() });
   }
 
   function advanceToResults() {
     if (!gameState) return;
 
-    // Calculate votes
-    const voteCounts: Record<string, number> = {};
-    Object.values(gameState.votes).forEach((drawingId) => {
-      voteCounts[drawingId] = (voteCounts[drawingId] || 0) + 1;
-    });
+    // Calculate votes locally for display, but server state is source of truth
+    // Actually results calculation usually implies we stop voting.
+    // We can just switch phase to 'results'.
+    // The results computation (who won) can be done on the fly by clients based on 'votes' state.
 
-    const drawingsWithVotes = gameState.drawings.map((drawing) => ({
-      ...drawing,
-      votes: voteCounts[drawing.id] || 0,
-    }));
-
-    const newState: GameState = {
-      ...gameState,
-      phase: 'results',
-      drawings: drawingsWithVotes,
-    };
-    setGameState(newState);
-    realtimeSync.broadcastState(newState);
+    realtimeSync.updatePhase('results', 0);
+    // Optimistic
+    setGameState({ ...gameState, phase: 'results' });
   }
 
   async function handleDrawingComplete(imageData: string) {
@@ -256,19 +227,11 @@ export default function Home() {
     setHasSubmitted(true);
   }
 
-  function handleVote(drawingId: string) {
+  async function handleVote(drawingId: string) {
     if (!gameState || userVote === drawingId) return;
 
-    const newState: GameState = {
-      ...gameState,
-      votes: {
-        ...gameState.votes,
-        [userId]: drawingId,
-      },
-    };
-
-    setGameState(newState);
-    realtimeSync.broadcastState(newState);
+    // Use atomic vote
+    await realtimeSync.submitVote(userId, drawingId);
     setUserVote(drawingId);
   }
 
@@ -281,10 +244,12 @@ export default function Home() {
       startTime: Date.now(),
       drawingTimeLimit: 120,
       votingTimeLimit: 20,
-      activePlayers: userId ? { [userId]: Date.now() } : {},
+      activePlayers: {},
     };
+    // Atomic Reset
+    realtimeSync.resetGame(newState);
+    // Optimistic
     setGameState(newState);
-    realtimeSync.broadcastState(newState);
     setHasSubmitted(false);
     setUserVote(null);
     setTimeLeft(newState.drawingTimeLimit);

@@ -16,9 +16,15 @@ class RealtimeSync {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      // Subscribe to Postgres Changes
-      supabase
-        .channel('game-updates')
+      const channel = supabase.channel('game-updates', {
+        config: {
+          presence: {
+            key: ROOM_ID,
+          },
+        },
+      });
+
+      channel
         .on(
           'postgres_changes',
           {
@@ -32,18 +38,34 @@ class RealtimeSync {
               this.notifyListeners(null);
             } else if (payload.new && (payload.new as any).state) {
               const newState = (payload.new as any).state as GameState;
-              // Update local cache
+
+              // Merge with local active players from Presence if needed?
+              // For now just raw state update
               localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
               this.notifyListeners(newState);
             }
           }
         )
-        .subscribe();
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          // We can notify listeners about presence here if we want
+          // But main game state is separate.
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            // Track presence once connected
+            // We need userId for this, so we'll expose a method for it
+          }
+        });
+
+      this.channelRef = channel;
 
       // Fetch initial state immediately
       this.fetchLatest();
     }
   }
+
+  private channelRef: any = null;
 
   private async fetchLatest() {
     const { data, error } = await supabase
@@ -76,55 +98,58 @@ class RealtimeSync {
     this.listeners.forEach((callback) => callback(state));
   }
 
-  async submitDrawing(drawing: any) {
-    // Optimistic update
-    const cached = this.getState();
-    if (cached) {
-      cached.drawings.push(drawing);
-      this.notifyListeners(cached);
+  async trackPresence(userId: string) {
+    if (this.channelRef) {
+      await this.channelRef.track({
+        user: userId,
+        onlineAt: new Date().toISOString(),
+      });
     }
+  }
 
-    // Server Atomic Update
+  getPresenceState() {
+    if (!this.channelRef) return {};
+    return this.channelRef.presenceState();
+  }
+
+  async submitDrawing(drawing: any) {
     const { error } = await supabase.rpc('submit_drawing', {
       room_id: ROOM_ID,
       drawing: drawing
     });
-
-    if (error) {
-      console.error('Error submitting drawing:', error);
-      // Revert or re-fetch specific strategy could go here
-    }
+    if (error) console.error('Error submitting drawing:', error);
   }
 
   async submitVote(userId: string, drawingId: string) {
-    const cached = this.getState();
-    if (cached) {
-      cached.votes[userId] = drawingId;
-      this.notifyListeners(cached);
-    }
-
     const { error } = await supabase.rpc('submit_vote', {
       room_id: ROOM_ID,
       user_id: userId,
       drawing_id: drawingId
     });
-
-    if (error) {
-      console.error('Error submitting vote:', error);
-    }
+    if (error) console.error('Error submitting vote:', error);
   }
 
-  async broadcastState(state: GameState, atomic = false) {
-    // 1. Optimistic update
-    this.notifyListeners(state);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  async updatePhase(phase: string, timeLimit: number) {
+    // Phase change logic
+    const { error } = await supabase.rpc('update_phase', {
+      room_id: ROOM_ID,
+      new_phase: phase,
+      new_time_limit: timeLimit
+    });
+    if (error) console.error('Error updating phase:', error);
+  }
 
-    if (atomic) {
-      // If we flagged this as critical, we might want to be careful
-      // But for general phase changes, simple Upsert is usually OK as long as only one person does it (The host)
-    }
+  async resetGame(newState: GameState) {
+    const { error } = await supabase.rpc('reset_game', {
+      room_id: ROOM_ID,
+      new_state: newState
+    });
+    if (error) console.error('Error resetting game:', error);
+  }
 
-    // 2. Persist to DB
+  // Legacy broadcast - Try to avoid using this for partial updates!
+  async broadcastState(state: GameState) {
+    // Only use this for creation of ANY new room
     const { error } = await supabase
       .from('game_rooms')
       .upsert({
@@ -132,10 +157,7 @@ class RealtimeSync {
         state,
         updated_at: new Date().toISOString()
       });
-
-    if (error) {
-      console.error('Error syncing state to Supabase:', error);
-    }
+    if (error) console.error('Error syncing state to Supabase:', error);
   }
 
   // Synchronous read from cache (legacy support)
